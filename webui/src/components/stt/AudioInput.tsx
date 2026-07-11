@@ -45,6 +45,11 @@ export function AudioInput({
   const [dragging, setDragging] = useState(false)
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  // getUserMedia is only available in a secure context (HTTPS or http://localhost).
+  const recordingSupported =
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    !!navigator.mediaDevices?.getUserMedia
   const fileInputRef = useRef<HTMLInputElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -73,7 +78,13 @@ export function AudioInput({
 
   const startRecording = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      onError?.('Recording is not supported in this browser.')
+      // navigator.mediaDevices is only exposed in a secure context (HTTPS or
+      // http://localhost), so an insecure LAN origin fails here in every browser.
+      onError?.(
+        window.isSecureContext
+          ? 'Recording is not supported in this browser.'
+          : 'Microphone recording needs a secure context — open the console over HTTPS or http://localhost. File upload works on any origin.',
+      )
       return
     }
     try {
@@ -223,15 +234,23 @@ export function AudioInput({
           </Button>
         </div>
       ) : (
-        <Button
-          variant="secondary"
-          fullWidth
-          onClick={startRecording}
-          disabled={disabled}
-        >
-          <MicIcon className="text-[1.1rem]" />
-          Record from microphone
-        </Button>
+        <>
+          <Button
+            variant="secondary"
+            fullWidth
+            onClick={startRecording}
+            disabled={disabled || !recordingSupported}
+          >
+            <MicIcon className="text-[1.1rem]" />
+            Record from microphone
+          </Button>
+          {!recordingSupported && (
+            <p className="mt-2 text-center text-xs text-muted">
+              Microphone recording needs HTTPS or http://localhost. File upload
+              works on any origin.
+            </p>
+          )}
+        </>
       )}
     </div>
   )
