@@ -1,0 +1,271 @@
+name: Create Release and Publish Docker Images
+
+on:
+  # Manual-only for now: image builds and releases NEVER trigger automatically
+  # (the tag-push trigger is intentionally disabled) until re-enabled. Dispatch
+  # with validate_only=true to build and push images without cutting a Release.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0 (creates tag v<version>)"
+        required: true
+        type: string
+      publish_jetson:
+        description: "Also build and push the Jetson (arm64) image"
+        type: boolean
+        default: true
+      validate_only:
+        description: "Validation run (e.g. from a branch): push version tags only — no :latest tags, no GitHub Release"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      image_base: ${{ steps.v.outputs.image_base }}
+      amd64_tags: ${{ steps.v.outputs.amd64_tags }}
+      jetson_tags: ${{ steps.v.outputs.jetson_tags }}
+    steps:
+      - name: Resolve version, image base, and tag sets
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VER="${{ inputs.version }}"
+          else
+            REF="${{ github.ref_name }}"; VER="${REF#v}"
+          fi
+          BASE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "image_base=${BASE}" >> "$GITHUB_OUTPUT"
+
+          # Validation runs push only the version tags, never :latest. The
+          # unsuffixed alias (${BASE}:${VER}) is required for Agent Command's
+          # amd64 auto-select.
+          AMD="${BASE}-cu128:${VER},${BASE}:${VER}"
+          JET="${BASE}-jetson:${VER}"
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.validate_only }}" != "true" ]; then
+            AMD="${AMD},${BASE}-cu128:latest,${BASE}:latest"
+            JET="${JET},${BASE}-jetson:latest"
+          fi
+          echo "amd64_tags=${AMD}" >> "$GITHUB_OUTPUT"
+          echo "jetson_tags=${JET}" >> "$GITHUB_OUTPUT"
+
+  build-amd64:
+    needs: setup
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          docker system prune -af || true
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ needs.setup.outputs.amd64_tags }}
+          labels: |
+            org.opencontainers.image.title=ForgeGuard Faster Whisper Server (CUDA cu128)
+            org.opencontainers.image.description=OpenAI-compatible Whisper STT served via FastAPI. amd64 CUDA build (cu128) for NVIDIA RTX 3000 through RTX 5000.
+            org.opencontainers.image.version=${{ needs.setup.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-jetson:
+    # The Jetson image is validated on real Orin hardware, so it builds and
+    # publishes alongside the amd64 image (on a tag push, or on dispatch unless
+    # publish_jetson is disabled).
+    needs: setup
+    if: ${{ github.event_name == 'push' || inputs.publish_jetson }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/jetson/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ needs.setup.outputs.jetson_tags }}
+          labels: |
+            org.opencontainers.image.title=ForgeGuard Faster Whisper Server (Jetson)
+            org.opencontainers.image.version=${{ needs.setup.outputs.version }}
+
+  smoke-amd64:
+    # Boots the freshly published amd64 image on the CPU runner and asserts the
+    # health/readiness contract end to end. HF_HUB_OFFLINE=1 proves the image
+    # starts with zero network — validating that the tiny model was baked in.
+    needs: [setup, build-amd64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run smoke test
+        env:
+          IMAGE: ${{ needs.setup.outputs.image_base }}-cu128:${{ needs.setup.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker run -d --name whisper -p 8000:8000 \
+            -e DEVICE=cpu -e COMPUTE_TYPE=int8 -e MODEL_SIZE=tiny \
+            -e HF_HUB_OFFLINE=1 -e API_KEY=smoketestkey "$IMAGE"
+
+          echo "--- /health must answer <500 within 30s of container start"
+          start=$(date +%s)
+          until curl -sf -o /dev/null http://127.0.0.1:8000/health; do
+            if [ $(( $(date +%s) - start )) -ge 30 ]; then
+              echo "FAIL: /health not answering within 30s"; docker logs whisper; exit 1
+            fi
+            sleep 1
+          done
+          echo "health up after $(( $(date +%s) - start ))s"
+          body=$(curl -s http://127.0.0.1:8000/health)
+          echo "$body" | grep -Eq '"status":\s*"(warming|healthy)"' || { echo "FAIL: unexpected health body: $body"; exit 1; }
+
+          echo "--- wait for /ready (tiny int8 baked; CPU runner budget 120s)"
+          until curl -sf -o /dev/null http://127.0.0.1:8000/ready; do
+            if [ $(( $(date +%s) - start )) -ge 120 ]; then
+              echo "FAIL: /ready never returned 200"; docker logs whisper; exit 1
+            fi
+            sleep 3
+          done
+          echo "ready after $(( $(date +%s) - start ))s"
+
+          echo "--- auth: 401 without key, 200 with key"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/v1/models)" = "401" ]
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer smoketestkey' http://127.0.0.1:8000/v1/models)" = "200" ]
+
+          echo "--- real transcription of docker/jfk.flac must contain 'country'"
+          out=$(curl -s -w '\n%{http_code}' -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
+            -H 'Authorization: Bearer smoketestkey' \
+            -F 'file=@docker/jfk.flac' -F 'response_format=text')
+          code=$(echo "$out" | tail -n1)
+          text=$(echo "$out" | sed '$d')
+          [ "$code" = "200" ] || { echo "FAIL: transcription returned $code"; docker logs whisper; exit 1; }
+          echo "$text" | grep -iq country || { echo "FAIL: transcript missing 'country': $text"; exit 1; }
+          echo "PASS: transcript = $text"
+
+          echo "--- unauthenticated transcription must be 401"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/v1/audio/transcriptions -F 'file=@docker/jfk.flac')" = "401" ]
+
+          docker logs whisper | tail -20
+          docker rm -f whisper
+
+  publish-chart:
+    needs: [setup, smoke-amd64]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Log in to GHCR (helm)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Package and push chart
+        env:
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          helm package charts/faster-whisper-server --version "$VERSION" --app-version "$VERSION"
+          helm push "faster-whisper-server-${VERSION}.tgz" oci://ghcr.io/forgeguard/charts
+
+  create-release:
+    needs: [setup, build-amd64, smoke-amd64]
+    if: ${{ github.event_name == 'push' || inputs.validate_only != true }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Compose release body
+        env:
+          IMAGE: ${{ needs.setup.outputs.image_base }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          {
+            echo "## Container images"
+            echo ""
+            echo "**amd64 CUDA (cu128 — RTX 3000 through RTX 5000):**"
+            echo '```'
+            echo "docker pull ${IMAGE}:${VERSION}          # alias of -cu128"
+            echo "docker pull ${IMAGE}-cu128:${VERSION}"
+            echo '```'
+            echo ""
+            echo "**Jetson (arm64, Orin):**"
+            echo '```'
+            echo "docker pull ${IMAGE}-jetson:${VERSION}"
+            echo '```'
+            echo ""
+            echo "## Helm chart"
+            echo '```'
+            echo "helm install whisper oci://ghcr.io/forgeguard/charts/faster-whisper-server --version ${VERSION}"
+            echo '```'
+            echo ""
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/v${VERSION}/CHANGELOG.md) for the curated summary."
+          } > body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.setup.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Release v${{ needs.setup.outputs.version }}
+          body_path: body.md
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

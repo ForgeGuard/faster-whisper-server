@@ -1,0 +1,26 @@
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+build
+dist
+*.egg-info
+tests
+*.md
+# Repo tooling / assets not needed inside the image (docker/scripts IS needed).
+charts
+deploy
+.devcontainer
+assets
+scripts
+# Node / web console build artifacts (the image rebuilds these in a node stage)
+node_modules
+**/node_modules
+webui/dist

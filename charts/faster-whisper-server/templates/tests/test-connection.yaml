@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "faster-whisper-server.fullname" . }}-test-connection"
+  labels:
+    {{- include "faster-whisper-server.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      # /health is unauthenticated and returns 200 as soon as the pod serves.
+      args: ['{{ include "faster-whisper-server.fullname" . }}:{{ .Values.fasterWhisper.port }}/health']
+  restartPolicy: Never

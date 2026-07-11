@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  faster-whisper-api:
+    image: ghcr.io/forgeguard/faster-whisper-server-jetson:latest
+    container_name: faster-whisper-api
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      # Jetson Orin Nano (8GB) shares RAM between CPU and GPU. `small` is a safe
+      # default that leaves headroom for the OS, Portainer, and other stack
+      # services. Bump to `medium`/`large-v3` only if you've confirmed spare
+      # memory with `tegrastats` / `jtop`. (`small` is baked into the image.)
+      MODEL_SIZE: small
+      DEVICE: cuda
+      # int8_float16 uses less memory than float16 with a small accuracy
+      # tradeoff; switch back to float16 if you have memory headroom to spare.
+      COMPUTE_TYPE: int8_float16
+      BEAM_SIZE: "5"
+      ENABLE_VAD_FILTER: "true"
+      DEFAULT_LANGUAGE: ""
+      API_KEY: ""
+      # Load the model in the background at boot (default); the socket serves
+      # /health immediately while it warms.
+      WARMUP_ON_START: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    volumes:
+      # The image's default model (small) is baked in at /app/models — this
+      # cache volume is only needed to persist a runtime MODEL_SIZE override
+      # download. NEVER mount a volume over /app/models (it would shadow the
+      # baked weights).
+      - faster-whisper-cache:/home/appuser/.cache/huggingface
+
+volumes:
+  faster-whisper-cache:

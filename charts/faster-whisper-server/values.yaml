@@ -1,0 +1,113 @@
+# Default values for faster-whisper-server.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+fasterWhisper:
+  replicaCount: 1
+  # The name of the deployment repository (unsuffixed alias; the amd64 image).
+  repository: "ghcr.io/forgeguard/faster-whisper-server"
+  imagePullSecrets: [] # Set if using a private image or getting rate limited
+  # Defaults to the chart appVersion (a pinned release) when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+  port: 8000
+
+  # Optional bearer-token auth. When enabled, the API_KEY env var is injected
+  # from an existing Secret and clients must send `Authorization: Bearer <key>`
+  # on API routes (/health, /ready, and the web console stay open).
+  apiKey:
+    enabled: false
+    existingSecret: ""   # name of the Secret holding the key
+    secretKey: "api-key" # key within that Secret
+
+  # Extra environment variables for the container (name/value pairs).
+  # e.g. MODEL_SIZE, COMPUTE_TYPE, BEAM_SIZE, DEFAULT_LANGUAGE — see the README.
+  extraEnv: []
+  #  - name: COMPUTE_TYPE
+  #    value: int8_float16
+
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+    requests:
+      nvidia.com/gpu: 1
+
+  # Probes wired to the server's health contract:
+  #   /health -> 200 as soon as the process serves (also during model warmup)
+  #   /ready  -> 200 only once the model is warmed and inference will succeed
+  probes:
+    startup:
+      httpGet:
+        path: /ready
+        port: whisper-http
+      periodSeconds: 5
+      failureThreshold: 60 # up to 300s for a cold model load
+    liveness:
+      httpGet:
+        path: /health
+        port: whisper-http
+      periodSeconds: 30
+      timeoutSeconds: 5
+    readiness:
+      httpGet:
+        path: /ready
+        port: whisper-http
+      periodSeconds: 10
+      timeoutSeconds: 5
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # external-dns.alpha.kubernetes.io/hostname: whisper.example.com
+  hosts:
+    - host: whisper.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls: []
+  #  - secretName: faster-whisper-server-tls
+  #    hosts:
+  #      - whisper.example.com
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

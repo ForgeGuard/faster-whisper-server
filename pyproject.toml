@@ -1,0 +1,42 @@
+[project]
+name = "faster-whisper-server"
+version = "1.0.0"
+description = "Container-native OpenAI-compatible STT server built on faster-whisper"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Runtime pins. These are the exact versions installed into the container
+    # images (docker/Dockerfile, docker/jetson/Dockerfile) via `uv sync --frozen`,
+    # so the lockfile is the single source of truth for both dev and prod. Bump
+    # deliberately and rebuild-test before a release.
+    "faster-whisper==1.2.1",
+    "fastapi==0.139.0",
+    "uvicorn[standard]==0.50.0",
+    "python-multipart==0.0.32",
+    # faster-whisper pulls onnxruntime (Silero VAD) with a loose `>=1.14,<2`
+    # range; pin the last line that still ships CPython 3.10 wheels for both
+    # linux/amd64 and linux/arm64 (1.24+ dropped cp310) so the 3.10-based images
+    # and dev env resolve. Bump in lockstep with the Python floor.
+    "onnxruntime==1.23.2",
+    # CTranslate2 is faster-whisper's inference engine (allowed range <5,>=4.0).
+    # Pin the newest cp310 line explicitly so the lock is deterministic; on amd64
+    # this is the CUDA-enabled PyPI wheel, on Jetson the docker build compiles the
+    # SAME version from source (docker/jetson/Dockerfile CTRANSLATE2_VERSION) and
+    # force-reinstalls it over this wheel. Keep the two in lockstep.
+    "ctranslate2==4.8.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==8.3.5",
+    "pytest-cov==6.0.0",
+    "httpx==0.26.0",
+    "ruff==0.15.21",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["server"]

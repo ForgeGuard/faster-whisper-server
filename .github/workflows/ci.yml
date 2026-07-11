@@ -1,0 +1,29 @@
+name: CI
+on:
+  # Manual-only for now: nothing runs automatically on push/PR until re-enabled.
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v5
+
+      # No apt dependencies: faster-whisper decodes audio via PyAV (which bundles
+      # FFmpeg's libraries) and its onnxruntime/ctranslate2 wheels are
+      # self-contained. The suite downloads the ~75 MB tiny model on first run.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Lint (ruff)
+        run: uv run --extra test ruff check .
+
+      - name: Run tests
+        run: uv run --extra test pytest tests/

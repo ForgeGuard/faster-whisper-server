@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "faster-whisper-server.fullname" . }}
+  labels:
+    {{- include "faster-whisper-server.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.fasterWhisper.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "faster-whisper-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "faster-whisper-server.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.fasterWhisper.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "faster-whisper-server.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: whisper
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.fasterWhisper.repository }}:{{ .Values.fasterWhisper.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.fasterWhisper.pullPolicy }}
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            {{- if .Values.fasterWhisper.apiKey.enabled }}
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "fasterWhisper.apiKey.existingSecret is required when apiKey.enabled" .Values.fasterWhisper.apiKey.existingSecret }}
+                  key: {{ .Values.fasterWhisper.apiKey.secretKey }}
+            {{- end }}
+            {{- with .Values.fasterWhisper.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: whisper-http
+              containerPort: {{ .Values.fasterWhisper.port | default 8000 }}
+              protocol: TCP
+          startupProbe:
+            {{- toYaml .Values.fasterWhisper.probes.startup | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.fasterWhisper.probes.liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.fasterWhisper.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.fasterWhisper.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens — shared across both consoles. Colors are stored as raw
+ * "R G B" triples so Tailwind's `<alpha-value>` opacity modifier works.
+ * Light is the default; `.dark` on <html> flips to the dark palette.
+ */
+:root {
+  --color-bg: 247 248 250;
+  --color-surface: 255 255 255;
+  --color-surface-2: 244 245 248;
+  --color-elevated: 255 255 255;
+  --color-border: 226 229 234;
+  --color-border-strong: 209 213 220;
+  --color-fg: 17 20 28;
+  --color-muted: 90 98 112;
+  --color-faint: 140 148 162;
+  --color-accent: 99 102 241;
+  --color-accent-hover: 79 82 221;
+  --color-accent-fg: 255 255 255;
+  --color-accent-soft: 238 239 255;
+  --color-success: 22 163 74;
+  --color-danger: 220 38 38;
+  --color-warning: 202 138 4;
+
+  color-scheme: light;
+}
+
+.dark {
+  --color-bg: 10 12 18;
+  --color-surface: 20 23 32;
+  --color-surface-2: 27 31 42;
+  --color-elevated: 30 34 46;
+  --color-border: 42 47 60;
+  --color-border-strong: 58 64 80;
+  --color-fg: 233 236 243;
+  --color-muted: 156 163 178;
+  --color-faint: 110 117 132;
+  --color-accent: 129 132 248;
+  --color-accent-hover: 148 150 250;
+  --color-accent-fg: 12 14 22;
+  --color-accent-soft: 33 36 58;
+  --color-success: 74 222 128;
+  --color-danger: 248 113 113;
+  --color-warning: 250 204 21;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--color-border));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Consistent, accessible focus ring across interactive elements. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/60 ring-offset-2 ring-offset-bg;
+  }
+
+  ::selection {
+    background-color: rgb(var(--color-accent) / 0.28);
+  }
+
+  /* Themed scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--color-border-strong)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--color-border-strong));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--color-faint));
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Range slider — themed track fill via the --pct custom property. */
+  .ui-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      rgb(var(--color-accent)) 0%,
+      rgb(var(--color-accent)) var(--pct, 0%),
+      rgb(var(--color-surface-2)) var(--pct, 0%),
+      rgb(var(--color-surface-2)) 100%
+    );
+    outline: none;
+    cursor: pointer;
+  }
+  .ui-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: rgb(var(--color-surface));
+    border: 2px solid rgb(var(--color-accent));
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .ui-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.12);
+  }
+  .ui-slider:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgb(var(--color-accent) / 0.3);
+  }
+  .ui-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: rgb(var(--color-surface));
+    border: 2px solid rgb(var(--color-accent));
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+  }
+  .ui-slider::-moz-range-track {
+    height: 6px;
+    border-radius: 9999px;
+  }
+}
+
+@layer utilities {
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgb(var(--color-border) / 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--color-border) / 0.5) 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+  }
+}
