@@ -111,6 +111,13 @@ COPY VERSION /app/VERSION
 ARG MODEL_SIZE=small
 ARG MODEL_REVISION=
 ARG DOWNLOAD_MODEL=true
+# Promote the baked model to the runtime default so the image uses its baked
+# weights (not config.py's large-v3 default) when MODEL_SIZE is not overridden.
+# int8_float16 is the memory-conscious default for the 8 GB Orin (float16 OOMs
+# when coexisting with other GPU workloads); override COMPUTE_TYPE if you have
+# headroom.
+ENV MODEL_SIZE=${MODEL_SIZE} \
+    COMPUTE_TYPE=int8_float16
 RUN if [ "$DOWNLOAD_MODEL" = "true" ]; then \
       HF_HOME=/tmp/hf-build MODEL_REVISION="$MODEL_REVISION" \
         python3 /app/docker/scripts/download_model.py --model "$MODEL_SIZE" --output /app/models \

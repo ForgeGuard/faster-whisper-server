@@ -47,6 +47,9 @@ COPY VERSION /app/VERSION
 ARG MODEL_SIZE=large-v3
 ARG MODEL_REVISION=
 ARG DOWNLOAD_MODEL=true
+# Promote the baked model to the runtime default so the image uses its baked
+# weights (not config.py's default) when MODEL_SIZE is not overridden.
+ENV MODEL_SIZE=${MODEL_SIZE}
 RUN if [ "$DOWNLOAD_MODEL" = "true" ]; then \
       HF_HOME=/tmp/hf-build MODEL_REVISION="$MODEL_REVISION" \
         python3 /app/docker/scripts/download_model.py --model "$MODEL_SIZE" --output /app/models \
