@@ -2,6 +2,11 @@
 
 Kept unauthenticated so the browser UI can bootstrap (read its version and,
 later, prompt for an API key) before it holds any credentials.
+
+Fingerprinted bundles under /web/assets are served by a StaticFiles mount (set
+up in main.py alongside this router) so they get ETag/Last-Modified conditional
+handling (304s) for free; this router covers the redirect, config, index.html,
+and the SPA fallback.
 """
 
 import mimetypes
@@ -27,7 +32,14 @@ def _resolve_within(base_dir: str, filename: str) -> str:
 
 @router.get("/web/config")
 async def web_config() -> JSONResponse:
-    return JSONResponse({"version": __version__})
+    return JSONResponse(
+        {
+            "version": __version__,
+            "root_path": os.environ.get("UVICORN_ROOT_PATH", ""),
+            "max_upload_bytes": config.MAX_UPLOAD_BYTES,
+            "model": config.MODEL_SIZE,
+        }
+    )
 
 
 @router.get("/web")
@@ -41,15 +53,16 @@ async def web_redirect(request: Request) -> RedirectResponse:
 @router.get("/web/")
 @router.get("/web/{filename:path}")
 async def serve_web(filename: str = "") -> FileResponse:
-    if not config.ENABLE_WEB_UI:
-        raise HTTPException(status_code=404, detail="Web UI is disabled")
-
     if not filename or filename.endswith("/"):
         filename = os.path.join(filename, "index.html")
 
     target = _resolve_within(config.WEBUI_DIST_DIR, filename)
     if not os.path.isfile(target):
-        # SPA fallback: unknown client-side routes serve index.html.
+        # A dotted basename looks like an asset fetch — a real 404 beats
+        # serving index.html as a script/stylesheet. Extensionless paths are
+        # SPA client routes and fall back to index.html.
+        if "." in os.path.basename(filename):
+            raise HTTPException(status_code=404, detail="Not found")
         target = _resolve_within(config.WEBUI_DIST_DIR, "index.html")
         if not os.path.isfile(target):
             raise HTTPException(status_code=404, detail="Not found")

@@ -1,8 +1,15 @@
-"""Model resolution and pin-table tests (no network, no model load)."""
+"""Model resolution and pin-table tests (no network, no model load),
+plus config-module env handling (run in a subprocess: config reads env at import)."""
 
 import os
+import subprocess
+import sys
+
+import pytest
 
 from server import provisioning
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
 def test_baked_dir_used_when_model_bin_present(tmp_path):
@@ -66,3 +73,38 @@ def test_baked_model_dir_name_matches_size(tmp_path):
         (d / "model.bin").write_bytes(b"x")
         resolved = provisioning.resolve_model(size, str(tmp_path), None)
         assert resolved.model_path_or_id == os.path.join(str(tmp_path), size)
+
+
+def _load_config(env_overrides: dict) -> tuple[str, str]:
+    """Import server.config in a subprocess and return (DEVICE, COMPUTE_TYPE)."""
+    env = {k: v for k, v in os.environ.items() if k not in {"DEVICE", "COMPUTE_TYPE"}}
+    env.update(env_overrides)
+    out = subprocess.run(
+        [sys.executable, "-c", "from server import config; print(config.DEVICE); print(config.COMPUTE_TYPE)"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=ROOT,
+        check=True,
+    )
+    device, compute_type = out.stdout.strip().splitlines()
+    return device, compute_type
+
+
+@pytest.mark.parametrize(
+    ("env", "expected_device", "expected_compute_type"),
+    [
+        ({}, "cuda", "float16"),  # defaults unchanged
+        ({"DEVICE": "cpu"}, "cpu", "int8"),
+        ({"DEVICE": "auto"}, "auto", "default"),  # CTranslate2 auto-selects
+        ({"DEVICE": " CUDA "}, "cuda", "float16"),  # normalized, not exact-match
+        ({"DEVICE": " Cpu"}, "cpu", "int8"),
+        # An explicit COMPUTE_TYPE always wins verbatim.
+        ({"DEVICE": "cpu", "COMPUTE_TYPE": "float32"}, "cpu", "float32"),
+        ({"DEVICE": "auto", "COMPUTE_TYPE": "int8_float16"}, "auto", "int8_float16"),
+    ],
+)
+def test_config_device_compute_type_defaults(env, expected_device, expected_compute_type):
+    device, compute_type = _load_config(env)
+    assert device == expected_device
+    assert compute_type == expected_compute_type

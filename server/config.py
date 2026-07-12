@@ -9,13 +9,20 @@ def _as_bool(value: str) -> bool:
 
 # Model / inference
 MODEL_SIZE = os.getenv("MODEL_SIZE", "large-v3")
-DEVICE = os.getenv("DEVICE", "cuda")
-COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16")
-# CTranslate2 cannot run float16 on CPU. Fall back to int8 so a `DEVICE=cpu`
-# deployment that leaves the (GPU-oriented) float16 default doesn't hard-fail
-# at model load.
-if DEVICE == "cpu" and COMPUTE_TYPE in {"float16", "fp16"}:
+DEVICE = os.getenv("DEVICE", "cuda").strip().lower()
+# COMPUTE_TYPE default is device-dependent: float16 on CUDA, int8 on CPU
+# (CTranslate2 cannot run float16 on CPU), and "default" for anything else
+# (e.g. DEVICE=auto — CTranslate2 then picks the best supported type for
+# whatever device it lands on). An explicit COMPUTE_TYPE env wins verbatim.
+_COMPUTE_TYPE_ENV = os.getenv("COMPUTE_TYPE")
+if _COMPUTE_TYPE_ENV:
+    COMPUTE_TYPE = _COMPUTE_TYPE_ENV
+elif DEVICE == "cuda":
+    COMPUTE_TYPE = "float16"
+elif DEVICE == "cpu":
     COMPUTE_TYPE = "int8"
+else:
+    COMPUTE_TYPE = "default"
 BEAM_SIZE = int(os.getenv("BEAM_SIZE", "5"))
 DEFAULT_LANGUAGE = os.getenv("DEFAULT_LANGUAGE") or None
 ENABLE_VAD_FILTER = _as_bool(os.getenv("ENABLE_VAD_FILTER", "true"))

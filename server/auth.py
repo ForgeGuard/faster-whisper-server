@@ -22,8 +22,10 @@ def require_api_key(
     if config.API_KEY is None:
         return
 
+    # Compare as bytes: compare_digest rejects non-ASCII str inputs with a
+    # TypeError (a 500), and utf-8 handles non-ASCII on both sides.
     if credentials is None or not secrets.compare_digest(
-        credentials.credentials, config.API_KEY
+        credentials.credentials.encode("utf-8"), config.API_KEY.encode("utf-8")
     ):
         raise HTTPException(
             status_code=401,

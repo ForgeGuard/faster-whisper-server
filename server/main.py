@@ -7,9 +7,11 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server import config, model_status, models, transcription, web
 from server.auth import require_api_key
@@ -89,7 +91,42 @@ _auth = [Depends(require_api_key)]
 app.include_router(transcription.router, dependencies=_auth)
 app.include_router(models.router, dependencies=_auth)
 if config.ENABLE_WEB_UI:
+    # Fingerprinted bundles are served by StaticFiles for its conditional-request
+    # handling (ETag/If-None-Match 304s). Mounted before the router so the mount
+    # wins over the /web/{filename:path} catch-all; check_dir=False because the
+    # dist dir only exists in the built image.
+    app.mount(
+        "/web/assets",
+        StaticFiles(directory=os.path.join(config.WEBUI_DIST_DIR, "assets"), check_dir=False),
+        name="web-assets",
+    )
     app.include_router(web.router)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def openai_error_envelope(request: Request, exc: StarletteHTTPException):
+    """OpenAI-shaped error bodies: {"error": {message, type, code}}.
+
+    `detail` is kept verbatim alongside the envelope — the web console parses
+    it (e.g. detail.error == "model_warming"), while OpenAI SDKs read
+    body.error.message.
+    """
+    detail = exc.detail
+    default_type = "server_error" if exc.status_code >= 500 else "invalid_request_error"
+    if isinstance(detail, dict):
+        message = str(detail.get("message") or detail.get("error") or "")
+        error_type = str(detail.get("type") or default_type)
+    else:
+        message = str(detail)
+        error_type = default_type
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {"message": message, "type": error_type, "code": exc.status_code},
+            "detail": detail,
+        },
+        headers=exc.headers,
+    )
 
 
 @app.get("/health")
@@ -103,7 +140,14 @@ async def health_check():
         )
     if status is ModelStatus.WARMING:
         return {"status": "warming", "model_loaded": False}
-    return {"status": "healthy", "model_loaded": status is ModelStatus.READY}
+    meta = model_status.get_metadata()  # populated once loaded, {} before
+    return {
+        "status": "healthy",
+        "model_loaded": status is ModelStatus.READY,
+        "device": meta.get("device"),
+        "compute_type": meta.get("compute_type"),
+        "model": meta.get("model"),
+    }
 
 
 @app.get("/ready")

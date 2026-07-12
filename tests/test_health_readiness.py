@@ -65,7 +65,13 @@ def test_transitions():
 def test_health_uninitialized():
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "healthy", "model_loaded": False}
+    assert r.json() == {
+        "status": "healthy",
+        "model_loaded": False,
+        "device": None,
+        "compute_type": None,
+        "model": None,
+    }
 
 
 def test_health_warming():
@@ -79,7 +85,13 @@ def test_health_ready():
     model_status.set_ready("cpu", "int8", "tiny")
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "healthy", "model_loaded": True}
+    assert r.json() == {
+        "status": "healthy",
+        "model_loaded": True,
+        "device": "cpu",
+        "compute_type": "int8",
+        "model": "tiny",
+    }
 
 
 def test_health_failed():
@@ -136,6 +148,54 @@ def test_guard_passes_when_ready():
     model_status.set_ready("cpu", "int8", "tiny")
     r = client.post("/v1/audio/transcriptions", headers=AUTH)
     assert r.status_code == 422
+
+
+def test_warming_503_carries_openai_error_envelope():
+    """The envelope adds body.error for OpenAI SDKs while keeping detail intact
+    (the web console parses detail.error == 'model_warming')."""
+    model_status.set_warming()
+    r = client.post("/v1/audio/transcriptions", headers=AUTH)
+    assert r.status_code == 503
+    body = r.json()
+    assert body["detail"]["error"] == "model_warming"
+    assert body["error"] == {
+        "message": "STT model is still loading; retry shortly.",
+        "type": "server_error",
+        "code": 503,
+    }
+
+
+def test_lazy_load_flips_readiness(monkeypatch):
+    """With warmup skipped (state UNINITIALIZED), the first request's lazy load
+    must flip /ready to 200."""
+    from server import transcription
+
+    class _FakeInfo:
+        language = "en"
+        duration = 0.0
+
+    class _FakeModel:
+        def transcribe(self, *args, **kwargs):
+            return iter(()), _FakeInfo()
+
+    transcription._load_model.cache_clear()
+    monkeypatch.setattr(transcription, "WhisperModel", lambda *a, **k: _FakeModel())
+    try:
+        assert client.get("/ready").status_code == 503  # UNINITIALIZED
+
+        r = client.post(
+            "/v1/audio/transcriptions",
+            headers=AUTH,
+            files={"file": ("a.wav", b"x")},
+            data={"response_format": "json"},
+        )
+        assert r.status_code == 200
+
+        assert model_status.get_status() is ModelStatus.READY
+        assert client.get("/ready").status_code == 200
+    finally:
+        # Never leak the fake into the cache for the real-inference tests.
+        transcription._load_model.cache_clear()
 
 
 def test_models_open_while_warming():
@@ -220,7 +280,9 @@ def test_lifespan_warmup_disabled(monkeypatch):
         with TestClient(app) as c:
             r = c.get("/health")
             assert r.status_code == 200
-            assert r.json() == {"status": "healthy", "model_loaded": False}
+            body = r.json()
+            assert body["status"] == "healthy"
+            assert body["model_loaded"] is False
             assert model_status.get_status() is ModelStatus.UNINITIALIZED
 
 

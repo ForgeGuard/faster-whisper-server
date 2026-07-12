@@ -12,8 +12,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 from faster_whisper import WhisperModel
 
-from server import config, provisioning
+from server import config, model_status, provisioning
 from server.model_status import require_model_ready
+
+try:
+    from faster_whisper.tokenizer import _LANGUAGE_CODES
+except ImportError:  # private attribute — skip validation if it moves
+    _LANGUAGE_CODES = None
 
 LOGGER = logging.getLogger("faster_whisper_api")
 
@@ -61,7 +66,11 @@ def get_model() -> WhisperModel:
     to FAILED (that is reserved for a permanent warmup failure in main.py).
     """
     with _model_lock:
-        return _load_model()
+        model = _load_model()
+    # Lazy loads (WARMUP_ON_START=false) must flip readiness too, so /ready and
+    # /health metadata reflect reality; mirrors the warmup path in main.py.
+    model_status.set_ready(config.DEVICE, config.COMPUTE_TYPE, config.MODEL_SIZE)
+    return model
 
 
 async def _spool_upload(file: UploadFile, suffix: str) -> str:
@@ -71,18 +80,24 @@ async def _spool_upload(file: UploadFile, suffix: str) -> str:
         raise HTTPException(status_code=413, detail="Uploaded file is too large")
 
     written = 0
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-        audio_path = tmp_file.name
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    audio_path = tmp_file.name
+    try:
         while True:
             chunk = await file.read(_CHUNK_SIZE)
             if not chunk:
                 break
             written += len(chunk)
             if config.MAX_UPLOAD_BYTES and written > config.MAX_UPLOAD_BYTES:
-                tmp_file.close()
-                _safe_remove(audio_path)
                 raise HTTPException(status_code=413, detail="Uploaded file is too large")
             tmp_file.write(chunk)
+    except BaseException:
+        # ANY failure (client disconnect/CancelledError included) must not leave
+        # an orphaned temp file behind.
+        tmp_file.close()
+        _safe_remove(audio_path)
+        raise
+    tmp_file.close()
     return audio_path
 
 
@@ -118,6 +133,36 @@ def _word_dicts(segment) -> Optional[List[dict]]:
     ]
 
 
+def _subtitle_timestamp(seconds: float, decimal_sep: str) -> str:
+    ms = round(seconds * 1000)
+    hours, remainder = divmod(ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, milli = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}{decimal_sep}{milli:03d}"
+
+
+def to_srt(segments) -> str:
+    """SRT subtitle document (sequence number, HH:MM:SS,mmm cue times)."""
+    return "\n".join(
+        f"{i}\n"
+        f"{_subtitle_timestamp(segment.start, ',')} --> "
+        f"{_subtitle_timestamp(segment.end, ',')}\n"
+        f"{segment.text.strip()}\n"
+        for i, segment in enumerate(segments, start=1)
+    )
+
+
+def to_vtt(segments) -> str:
+    """WebVTT subtitle document (WEBVTT header, HH:MM:SS.mmm cue times)."""
+    body = "\n".join(
+        f"{_subtitle_timestamp(segment.start, '.')} --> "
+        f"{_subtitle_timestamp(segment.end, '.')}\n"
+        f"{segment.text.strip()}\n"
+        for segment in segments
+    )
+    return f"WEBVTT\n\n{body}"
+
+
 async def _handle_audio_request(
     file: UploadFile,
     *,
@@ -128,8 +173,17 @@ async def _handle_audio_request(
     task: str,
 ):
     """Shared body for transcription (task=transcribe) and translation (task=translate)."""
-    if response_format not in {"text", "json", "verbose_json"}:
+    if response_format not in {"text", "json", "verbose_json", "srt", "vtt"}:
         raise HTTPException(status_code=400, detail="Unsupported response_format")
+
+    if (
+        language
+        and _LANGUAGE_CODES is not None
+        and language.lower() not in _LANGUAGE_CODES
+    ):
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported language: {language}"
+        )
 
     wants_word_timestamps = (
         bool(timestamp_granularities) and "word" in timestamp_granularities
@@ -155,10 +209,18 @@ async def _handle_audio_request(
         if response_format == "text":
             return PlainTextResponse(transcript)
 
+        if response_format == "srt":
+            return PlainTextResponse(to_srt(segment_list))
+
+        if response_format == "vtt":
+            return PlainTextResponse(to_vtt(segment_list))
+
         if response_format == "json":
             return {"text": transcript}
 
-        # verbose_json — full detail per the OpenAI schema.
+        # verbose_json — full detail per the OpenAI schema. Word timings live
+        # only in the flattened top-level `words` list (OpenAI segments carry
+        # no per-word entries).
         return {
             "task": task,
             "language": info.language,
@@ -176,7 +238,6 @@ async def _handle_audio_request(
                     "avg_logprob": segment.avg_logprob,
                     "compression_ratio": segment.compression_ratio,
                     "no_speech_prob": segment.no_speech_prob,
-                    "words": _word_dicts(segment),
                 }
                 for segment in segment_list
             ],
@@ -205,14 +266,22 @@ async def create_transcription(
     response_format: str = Form("json"),
     temperature: float = Form(0.0),
     timestamp_granularities: Optional[List[str]] = Form(None),
+    # The OpenAI wire name is `timestamp_granularities[]` (array-style form
+    # field); FastAPI binds Form params by exact name, so accept both.
+    timestamp_granularities_bracketed: Optional[List[str]] = Form(
+        None, alias="timestamp_granularities[]"
+    ),
 ):
     del model, temperature
+    granularities = (timestamp_granularities or []) + (
+        timestamp_granularities_bracketed or []
+    )
     return await _handle_audio_request(
         file,
         language=language or config.DEFAULT_LANGUAGE,
         prompt=prompt,
         response_format=response_format,
-        timestamp_granularities=timestamp_granularities,
+        timestamp_granularities=granularities or None,
         task="transcribe",
     )
 
