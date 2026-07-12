@@ -31,7 +31,7 @@ bare-metal install path.
 | NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard/faster-whisper-server-jetson:latest` (bakes `small`) |
 | AMD (ROCm), Intel | planned — see [Roadmap](#roadmap) |
 
-`:latest` works, but pin a release tag (e.g. `:1.0.2`) for stable deployments.
+`:latest` works, but pin a release tag (e.g. `:1.0.3`) for stable deployments.
 
 <div align="center">
   <img src="assets/forgeguard-faster-whisper-server-web-ui.png" width="85%" alt="ForgeGuard Faster Whisper Server web console">
@@ -199,7 +199,7 @@ response-format selection, a model-warming banner, transcript copy and download
 ## Kubernetes (Helm)
 
 ```bash
-helm install whisper oci://ghcr.io/forgeguard/charts/faster-whisper-server --version 1.0.2
+helm install whisper oci://ghcr.io/forgeguard/charts/faster-whisper-server --version 1.0.3
 ```
 
 The chart (also in [`charts/faster-whisper-server`](charts/faster-whisper-server))

@@ -1,6 +1,6 @@
 [project]
 name = "faster-whisper-server"
-version = "1.0.2"
+version = "1.0.3"
 description = "Container-native OpenAI-compatible STT server built on faster-whisper"
 readme = "README.md"
 requires-python = ">=3.10"

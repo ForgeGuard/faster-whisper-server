@@ -8,6 +8,41 @@ the single source of truth for the release version.
 Per-PR detail is published automatically on each GitHub release page; this file
 is the curated summary.
 
+## [1.0.3]
+
+### Fixed
+- Word-level timestamps now work: the transcription endpoint accepts the
+  OpenAI wire field name `timestamp_granularities[]`, which the console,
+  README examples, and OpenAI SDKs all send.
+- `GET /ready` no longer stays `503` forever when `WARMUP_ON_START=false`;
+  lazy model loading marks readiness once the model is warm, so the chart's
+  startup probe stops killing otherwise-healthy pods.
+- `Authorization` headers containing non-ASCII bytes returned `500` instead
+  of `401`.
+- An unrecognized `language` parameter is now rejected with `400` before the
+  upload is spooled, instead of a `500` from deep inside transcription.
+- `DEVICE=auto` on a CPU-only host no longer crash-loops; the compute-type
+  fallback now covers it.
+- Uploaded audio spooled to a temp file is now cleaned up on write failure or
+  client cancellation, not just on success.
+- The web console's static file serving 404s missing hashed assets instead of
+  serving `index.html` as `text/html`, which broke cache-busting after a
+  redeploy.
+- `verbose_json` no longer duplicates the word list once per segment and
+  again at the top level; `srt`/`vtt` response formats are now supported
+  server-side.
+- Error responses use an OpenAI-shaped `error` envelope; `/health` reports
+  the resolved device/compute-type/model.
+- The Helm chart's `fasterWhisper.port` setting now actually changes the
+  port the server listens on — previously the container command hardcoded
+  `8000` regardless of the chart value.
+- Web console: the health-poll banner no longer gets stuck on "failed"
+  permanently after a transient error; a reverse-proxy path prefix like
+  `/webtools` is now detected correctly; microphone recording no longer
+  leaks an open stream on a double-click or a `MediaRecorder` failure;
+  transcription requests are now cancellable instead of locking the UI on a
+  hung server; segment timestamps no longer render as `0:60.0`.
+
 ## [1.0.2]
 
 ### Fixed
