@@ -168,7 +168,7 @@ def test_warming_503_carries_openai_error_envelope():
 def test_lazy_load_flips_readiness(monkeypatch):
     """With warmup skipped (state UNINITIALIZED), the first request's lazy load
     must flip /ready to 200."""
-    from server import transcription
+    from server import model_manager
 
     class _FakeInfo:
         language = "en"
@@ -178,8 +178,8 @@ def test_lazy_load_flips_readiness(monkeypatch):
         def transcribe(self, *args, **kwargs):
             return iter(()), _FakeInfo()
 
-    transcription._load_model.cache_clear()
-    monkeypatch.setattr(transcription, "WhisperModel", lambda *a, **k: _FakeModel())
+    model_manager.reset()
+    monkeypatch.setattr(model_manager, "WhisperModel", lambda *a, **k: _FakeModel())
     try:
         assert client.get("/ready").status_code == 503  # UNINITIALIZED
 
@@ -194,8 +194,8 @@ def test_lazy_load_flips_readiness(monkeypatch):
         assert model_status.get_status() is ModelStatus.READY
         assert client.get("/ready").status_code == 200
     finally:
-        # Never leak the fake into the cache for the real-inference tests.
-        transcription._load_model.cache_clear()
+        # Never leak the fake model into the manager for the real-inference tests.
+        model_manager.reset()
 
 
 def test_models_open_while_warming():

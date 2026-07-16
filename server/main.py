@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from server import config, model_status, models, transcription, web
+from server import config, model_admin, model_status, models, system, transcription, web
 from server.auth import require_api_key
 from server.model_status import ModelStatus
 from server.version import __version__
@@ -46,10 +46,15 @@ async def _warmup(app: FastAPI) -> None:
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(1)
-    model_status.set_ready(config.DEVICE, config.COMPUTE_TYPE, config.MODEL_SIZE)
+    # get_model already flipped readiness with the active (possibly persisted)
+    # size; reflect that same size here rather than the configured default.
+    from server import model_manager
+
+    active = model_manager.active_model()
+    model_status.set_ready(config.DEVICE, config.COMPUTE_TYPE, active)
     LOGGER.info(
         "Model warmed up: %s on %s (%s)",
-        config.MODEL_SIZE,
+        active,
         config.DEVICE,
         config.COMPUTE_TYPE,
     )
@@ -90,6 +95,12 @@ app = FastAPI(
 _auth = [Depends(require_api_key)]
 app.include_router(transcription.router, dependencies=_auth)
 app.include_router(models.router, dependencies=_auth)
+# Model-mode switching mutates GPU state — bearer-auth guarded like /v1. Not
+# gated on model readiness so the operator can switch even while warming/failed.
+app.include_router(model_admin.router, dependencies=_auth)
+# Live telemetry (GPU + activity). Open like /health so the console monitor
+# renders before a key is entered; it exposes no PII.
+app.include_router(system.router)
 if config.ENABLE_WEB_UI:
     # Fingerprinted bundles are served by StaticFiles for its conditional-request
     # handling (ETag/If-None-Match 304s). Mounted before the router so the mount

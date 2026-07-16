@@ -130,13 +130,21 @@ RUN if [ "$DOWNLOAD_MODEL" = "true" ]; then \
 COPY server/ /app/server/
 COPY --from=webbuild /web/dist /app/webui_dist
 
-RUN chown -R appuser:appuser /app /home/appuser
+# Persistent, writable state (TLS cert/key, active-model choice).
+ENV DATA_DIR=/data
+RUN mkdir -p /data
+
+RUN chown -R appuser:appuser /app /home/appuser /data
 USER appuser
+VOLUME ["/data"]
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
+# Default healthcheck speaks HTTP; the TLS deploy overrides it for HTTPS.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:8000/health" || exit 1
 
-CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# `python -m server` wraps uvicorn so TLS_ENABLED wires ssl in; behaviour-
+# identical to `uvicorn server.main:app` when TLS is off.
+CMD ["python3", "-m", "server"]

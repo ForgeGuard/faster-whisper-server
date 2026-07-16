@@ -1,6 +1,6 @@
 [project]
 name = "faster-whisper-server"
-version = "1.0.3"
+version = "1.1.0"
 description = "Container-native OpenAI-compatible STT server built on faster-whisper"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,13 @@ dependencies = [
     # SAME version from source (docker/jetson/Dockerfile CTRANSLATE2_VERSION) and
     # force-reinstalls it over this wheel. Keep the two in lockstep.
     "ctranslate2==4.8.1",
+    # Built-in HTTPS: generate a self-signed cert on first run (server/tls.py) so
+    # a deployment can speak HTTPS with no reverse proxy. Pure-Python API over a
+    # bundled OpenSSL; ships wheels for both linux/amd64 and linux/arm64.
+    "cryptography==43.0.0",
+    # Live GPU telemetry (server/system.py). Pure-Python NVML bindings; a no-op
+    # (metrics omitted) when no NVIDIA driver is present, so it is safe on CPU.
+    "nvidia-ml-py==12.560.30",
 ]
 
 [project.optional-dependencies]

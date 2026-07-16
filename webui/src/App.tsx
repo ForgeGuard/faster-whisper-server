@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppShell } from './components/AppShell'
+import { GpuMonitor } from './components/GpuMonitor'
+import { ModelSelector } from './components/ModelSelector'
+import {
+  NotFound,
+  consoleHome,
+  isUnknownRoute,
+} from './components/NotFound'
 import { SettingsDialog } from './components/SettingsDialog'
 import {
   AudioInput,
@@ -21,7 +28,6 @@ import {
   type TranscriptionResult,
 } from './lib/sttApi'
 import {
-  Badge,
   Button,
   Card,
   CardBody,
@@ -41,6 +47,11 @@ const FORMATS: { value: ResponseFormat; label: string }[] = [
   { value: 'verbose_json', label: 'Verbose JSON (segments)' },
 ]
 
+// Branding: the full product name is the app title; the section names the
+// current view. The browser tab reads "<Section> · <App title>".
+const APP_TITLE = 'ForgeGuard Faster Whisper Server'
+const SECTION = 'Transcribe'
+
 export default function App() {
   const toast = useToast()
   const [ready, setReady] = useState(false)
@@ -48,7 +59,6 @@ export default function App() {
     'connecting',
   )
   const [version, setVersion] = useState('')
-  const [model, setModel] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   // True once the server has answered 401: auth is enabled and we lack a valid
   // key. Drives the inline "Enter API key" affordance.
@@ -69,16 +79,15 @@ export default function App() {
   const [maxUploadBytes, setMaxUploadBytes] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
 
-  // Authorized data load: doubles as the model-chip source and the signal that
+  // Authorized probe: hitting /v1/models with the stored key is the signal that
   // a valid key (or open API) is in effect — clears the auth-required state.
   const loadModel = useCallback(async () => {
     try {
-      const id = await fetchModel()
+      await fetchModel()
       setAuthRequired(false)
-      setModel(id)
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return
-      // Non-fatal: the console still works; the model chip just stays empty.
+      // Non-fatal: the console still works even if the probe fails.
     }
   }, [])
 
@@ -150,9 +159,24 @@ export default function App() {
     }
   }, [serverStatus, toast])
 
+  const [notFound] = useState(isUnknownRoute)
+
+  // Browser-tab title: "<Section> · <App title>".
+  useEffect(() => {
+    document.title = notFound
+      ? `Not found · ${APP_TITLE}`
+      : `${SECTION} · ${APP_TITLE}`
+  }, [notFound])
+
   const warming = serverStatus === 'warming' || serverStatus === 'connecting'
   const canRun =
     ready && !transcribing && serverStatus === 'healthy' && Boolean(selection)
+
+  // Switching the resident model takes the server through WARMING again; re-arm
+  // the health poll so the console reflects it and re-enables when ready.
+  const onModelSwitchStart = useCallback(() => {
+    setServerStatus('warming')
+  }, [])
 
   const selectAudio = (sel: AudioSelection) => {
     setSelection((prev) => {
@@ -238,10 +262,14 @@ export default function App() {
     (inFlightTask ?? task) === 'translate' ? 'Translate' : 'Transcribe'
   const wordsEnabled = format === 'verbose_json' && task === 'transcribe'
 
+  if (notFound) {
+    return <NotFound home={consoleHome()} />
+  }
+
   return (
     <AppShell
-      title="ForgeGuard Faster Whisper Server"
-      tagline="Speech-to-text console"
+      title={APP_TITLE}
+      tagline={SECTION}
       mark={<MicIcon />}
       version={version}
       onOpenSettings={() => setSettingsOpen(true)}
@@ -273,6 +301,24 @@ export default function App() {
           </span>
         </div>
       )}
+      {/* Model mode + live GPU/activity monitor strip */}
+      <div className="mb-6 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-fg">Model</span>
+            <span className="text-xs text-faint">
+              Switch the resident Whisper size — larger is more accurate, smaller
+              is faster and lighter on VRAM.
+            </span>
+          </div>
+          <ModelSelector
+            disabled={warming || transcribing}
+            onSwitchStart={onModelSwitchStart}
+          />
+        </div>
+        <GpuMonitor />
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         {/* Main column */}
         <div className="flex flex-col gap-6">
@@ -341,16 +387,7 @@ export default function App() {
         {/* Options sidebar */}
         <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader
-              title="Options"
-              action={
-                model ? (
-                  <Badge variant="muted" title="Configured server model">
-                    {model}
-                  </Badge>
-                ) : undefined
-              }
-            />
+            <CardHeader title="Options" />
             <CardBody className="space-y-5">
               <Field label="Mode">
                 {() => (

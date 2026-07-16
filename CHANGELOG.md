@@ -8,6 +8,43 @@ the single source of truth for the release version.
 Per-PR detail is published automatically on each GitHub release page; this file
 is the curated summary.
 
+## [1.1.0]
+
+### Added
+- **Built-in HTTPS.** Set `TLS_ENABLED=true` and the server speaks HTTPS
+  directly (uvicorn SSL) with no reverse proxy. When no cert is supplied it
+  generates a self-signed one on first run (RSA 2048; SANs for the CN plus
+  `localhost`/`127.0.0.1`/`::1`; ~10y validity), persists it under
+  `<DATA_DIR>/tls` with the key at mode `0600`, and reuses it on restart.
+  Configurable via `TLS_SELF_SIGNED`, `TLS_CERT_FILE`, `TLS_KEY_FILE`,
+  `TLS_CN`, `TLS_SAN`.
+- **Live GPU telemetry** on a new open `GET /system` endpoint: GPU
+  utilization, VRAM, temperature, and power (best-effort via NVML), plus
+  in-flight/queued request counts. The web console renders a compact,
+  theme-matched GPU + activity monitor from it.
+- **Runtime model switching.** Pick the resident Whisper size from the console
+  (`tiny` … `large-v3`, `large-v3-turbo`, `distil-large-v3`) or via the
+  auth-guarded `POST /api/model/activate`; the server loads/unloads to manage
+  VRAM and persists the choice to `<DATA_DIR>/active_model`, resuming it on
+  restart. `GET /api/model/presets` lists the catalog.
+- **Whisper “turbo”** (`large-v3-turbo`) added to the model catalog. Bake extra
+  sizes into an image at build time with `--build-arg EXTRA_MODELS="…"`.
+- **Local single-GPU deployment**: `deploy/docker-compose.local.yml` brings the
+  stack up with HTTPS, a reserved NVIDIA GPU, and an HTTPS healthcheck override.
+- **Privacy controls for transcripts (PII).** `LOG_INPUT_TEXT=false` (default)
+  keeps transcript text out of logs; `PERSIST_AUDIO=false` and `RETENTION_DAYS`
+  document data handling. New `docs/security.md` and `docs/responsible-use.md`.
+- **Container hardening**: the Helm chart now sets `runAsNonRoot`, `runAsUser`,
+  an `fsGroup`, drops all capabilities, and disables privilege escalation.
+
+### Changed
+- The image entrypoint is now `python -m server`, a thin uvicorn wrapper that
+  wires in TLS when enabled; behaviour is identical to the previous
+  `uvicorn server.main:app` command when TLS is off.
+- Web console: full product name as the app title with the section beneath it,
+  browser-tab title `"<Section> · <App>"`, a model-size selector, the GPU/
+  activity monitor, and a not-found view.
+
 ## [1.0.3]
 
 ### Fixed

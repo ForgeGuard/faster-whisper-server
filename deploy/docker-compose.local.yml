@@ -1,0 +1,76 @@
+# Local single-GPU deployment (this host: NVIDIA A2, 16 GB).
+#
+# One container running faster-whisper on the GPU, serving the OpenAI-compatible
+# API and the web console over HTTPS via a self-signed certificate generated on
+# first start and persisted in the data volume — no reverse proxy, no manual
+# openssl, no extra container.
+#
+#   docker compose -f deploy/docker-compose.local.yml up -d --build
+#   open https://localhost:8443/web
+#
+# The certificate is self-signed, so browsers show a one-time "not trusted"
+# warning — expected for local/self-hosted testing. This compose bakes the
+# `small` model (plus the always-baked `tiny`) for a fast local build; the
+# published images bake `large-v3`. Switch the resident size live from the
+# console's model picker.
+
+services:
+  faster-whisper:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # Keep the local image small: bake `small` as the default (tiny is
+        # always baked too), so model-switching works fully offline.
+        MODEL_SIZE: small
+        # Also bake Whisper "turbo" so it's selectable offline from the picker.
+        EXTRA_MODELS: large-v3-turbo
+    image: faster-whisper-server:local
+    container_name: faster-whisper-local
+    ports:
+      - "8443:8000"
+    environment:
+      MODEL_SIZE: small
+      DEVICE: cuda
+      COMPUTE_TYPE: float16
+      # HTTPS with an auto-generated self-signed cert persisted under /data/tls.
+      TLS_ENABLED: "true"
+      TLS_SELF_SIGNED: "true"
+      TLS_CN: localhost
+      # TLS_SAN: "whisper.local,192.168.1.50"   # extra SANs if reached by name/IP
+      # API_KEY: "change-me"                     # protect the API + model switch
+      # Transcripts are PII: text stays out of logs by default (LOG_INPUT_TEXT).
+    volumes:
+      # Persists the TLS cert/key, the active-model choice, and any runtime
+      # model-size download. NEVER mount over /app/models (shadows baked weights).
+      - fw-data:/data
+      - fw-hf-cache:/home/appuser/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # The image's default HEALTHCHECK speaks HTTP; override it for HTTPS and
+    # accept the self-signed cert. Generous start_period: first start warms the
+    # model (and downloads it if a non-baked size becomes active).
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import ssl, sys, urllib.request
+          ctx = ssl._create_unverified_context()
+          r = urllib.request.urlopen("https://127.0.0.1:8000/health", context=ctx, timeout=4)
+          sys.exit(0 if r.status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      start_period: 300s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  fw-data:
+  fw-hf-cache:

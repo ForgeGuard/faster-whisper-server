@@ -3,16 +3,13 @@
 import logging
 import os
 import tempfile
-import threading
-from functools import lru_cache
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
-from faster_whisper import WhisperModel
 
-from server import config, model_status, provisioning
+from server import activity, config, model_manager
 from server.model_status import require_model_ready
 
 try:
@@ -31,46 +28,13 @@ router = APIRouter(dependencies=[Depends(require_model_ready)])
 # Read the upload in bounded chunks so a large body is never buffered whole in RAM.
 _CHUNK_SIZE = 1024 * 1024
 
-# Serialize model construction: @lru_cache does not lock around a cache miss, so
-# the warmup task and an early lazy request could otherwise both build a
-# WhisperModel and double-allocate the GPU.
-_model_lock = threading.Lock()
 
-
-@lru_cache(maxsize=1)
-def _load_model() -> WhisperModel:
-    resolved = provisioning.resolve_model(
-        config.MODEL_SIZE, config.MODEL_DIR, config.MODEL_REVISION
-    )
-    LOGGER.info(
-        "Loading WhisperModel(model=%s, source=%s, revision=%s, device=%s, compute_type=%s)",
-        resolved.model_path_or_id,
-        resolved.source,
-        resolved.revision,
-        config.DEVICE,
-        config.COMPUTE_TYPE,
-    )
-    return WhisperModel(
-        resolved.model_path_or_id,
-        device=config.DEVICE,
-        compute_type=config.COMPUTE_TYPE,
-        revision=resolved.revision,
-    )
-
-
-def get_model() -> WhisperModel:
-    """Thread-safe cached model accessor (warmup task and lazy requests share it).
-
-    ``lru_cache`` does not cache exceptions, so a failed load simply retries on
-    the next call — which is why a lazy-load failure must NOT flip model_status
-    to FAILED (that is reserved for a permanent warmup failure in main.py).
-    """
-    with _model_lock:
-        model = _load_model()
-    # Lazy loads (WARMUP_ON_START=false) must flip readiness too, so /ready and
-    # /health metadata reflect reality; mirrors the warmup path in main.py.
-    model_status.set_ready(config.DEVICE, config.COMPUTE_TYPE, config.MODEL_SIZE)
-    return model
+# The model lifecycle lives in server.model_manager (load/unload/switch/persist).
+# ``get_model`` stays exported here so existing call sites — and tests that patch
+# ``server.transcription.get_model`` — keep working unchanged.
+def get_model():
+    """Thread-safe accessor for the resident model (delegates to model_manager)."""
+    return model_manager.get_model()
 
 
 async def _spool_upload(file: UploadFile, suffix: str) -> str:
@@ -194,16 +158,40 @@ async def _handle_audio_request(
 
     try:
         # Offload the blocking, CPU/GPU-bound inference off the event loop so
-        # concurrent requests and the health probe are not stalled.
-        segment_list, info = await run_in_threadpool(
-            _run_inference,
-            audio_path,
-            language,
-            prompt,
-            wants_word_timestamps,
-            task,
-        )
+        # concurrent requests and the health probe are not stalled. The gate
+        # bounds concurrency and feeds the /system activity meter; under heavy
+        # load it sheds with a 503 instead of queueing without bound.
+        try:
+            async with activity.gate.slot():
+                segment_list, info = await run_in_threadpool(
+                    _run_inference,
+                    audio_path,
+                    language,
+                    prompt,
+                    wants_word_timestamps,
+                    task,
+                )
+        except activity.QueueFullError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "queue_full", "message": str(exc), "type": "server_error"},
+                headers={"Retry-After": "5"},
+            ) from exc
+        except activity.QueueTimeoutError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "queue_timeout", "message": str(exc), "type": "server_error"},
+                headers={"Retry-After": "10"},
+            ) from exc
         transcript = "".join(segment.text for segment in segment_list).strip()
+        # Transcripts are sensitive PII: never logged unless LOG_INPUT_TEXT is
+        # explicitly enabled (default off). Length/timing only, otherwise.
+        if config.LOG_INPUT_TEXT:
+            LOGGER.info("transcript (%s): %s", task, transcript)
+        else:
+            LOGGER.debug(
+                "transcription complete (task=%s, chars=%d)", task, len(transcript)
+            )
 
         # OpenAI: `text` is a raw text/plain body, not a JSON wrapper.
         if response_format == "text":

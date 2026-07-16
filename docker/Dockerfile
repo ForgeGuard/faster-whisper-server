@@ -47,6 +47,10 @@ COPY VERSION /app/VERSION
 ARG MODEL_SIZE=large-v3
 ARG MODEL_REVISION=
 ARG DOWNLOAD_MODEL=true
+# Extra models to also bake so they are selectable offline from the console's
+# model picker (space-separated sizes, e.g. "large-v3-turbo"). Empty by default,
+# so published images are unchanged; deploy/docker-compose.local.yml sets this.
+ARG EXTRA_MODELS=""
 # Promote the baked model to the runtime default so the image uses its baked
 # weights (not config.py's default) when MODEL_SIZE is not overridden.
 ENV MODEL_SIZE=${MODEL_SIZE}
@@ -55,6 +59,10 @@ RUN if [ "$DOWNLOAD_MODEL" = "true" ]; then \
         python3 /app/docker/scripts/download_model.py --model "$MODEL_SIZE" --output /app/models \
       && HF_HOME=/tmp/hf-build \
         python3 /app/docker/scripts/download_model.py --model tiny --output /app/models \
+      && for m in $EXTRA_MODELS; do \
+           HF_HOME=/tmp/hf-build \
+             python3 /app/docker/scripts/download_model.py --model "$m" --output /app/models || exit 1; \
+         done \
       && rm -rf /tmp/hf-build; \
     fi
 
@@ -62,13 +70,23 @@ RUN if [ "$DOWNLOAD_MODEL" = "true" ]; then \
 COPY server/ /app/server/
 COPY --from=webbuild /web/dist /app/webui_dist
 
-RUN chown -R appuser:appuser /app /home/appuser
+# Persistent, writable state (TLS cert/key, active-model choice). The only path
+# the non-root runtime needs to write; mount a named volume here in deploy/.
+ENV DATA_DIR=/data
+RUN mkdir -p /data
+
+RUN chown -R appuser:appuser /app /home/appuser /data
 USER appuser
+VOLUME ["/data"]
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
+# Default healthcheck speaks HTTP. The TLS deploy (deploy/docker-compose.local.yml)
+# overrides this to speak HTTPS with an unverified context.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:8000/health" || exit 1
 
-CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# `python -m server` wraps uvicorn so TLS_ENABLED wires ssl_certfile/keyfile in;
+# with TLS off it is behaviour-identical to the old `uvicorn server.main:app`.
+CMD ["python3", "-m", "server"]
