@@ -1,0 +1,22 @@
+version: 1
+enabled: true
+
+project:
+  slug: faster-whisper-server
+  title: ForgeGuard Faster Whisper Server
+  kind: original
+  summary: OpenAI-compatible local speech recognition with operationally safe container deployment.
+
+repository:
+  owner: forgeguard-ai
+  name: faster-whisper-server
+  default_branch: main
+
+source:
+  content_root: docs/site
+  entrypoint: index.md
+
+publishing:
+  route: /projects/faster-whisper-server/docs
+  versions: both
+  include_generated: false

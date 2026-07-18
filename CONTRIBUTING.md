@@ -4,6 +4,11 @@ Contributions are welcome. This project ships as **container images and a Helm
 chart only** — there is no supported bare-metal run path, and the development
 workflow reflects that: run tests with `uv`, exercise the server in a container.
 
+Maintainer procedures — development environment, the test workflow, and the
+release process — are documented under
+[`docs/maintainers/`](./docs/maintainers/). This file is the quick contributor
+guide; the maintainer docs go deeper.
+
 ## Dev container (recommended)
 
 The repo ships a multi-arch dev container (`.devcontainer/`, amd64 + arm64 —

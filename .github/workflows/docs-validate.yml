@@ -1,0 +1,49 @@
+name: Docs validation
+
+# Validates the README, the documentation manifest, and the published docs under
+# docs/site/. Pure-Python and self-contained: no model downloads, no GPU, and no
+# network access is required for the blocking checks.
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - ".forgeguard/docs.yml"
+      - "docs/site/**"
+      - "docs/maintainers/**"
+      - "scripts/docs/**"
+      - ".github/workflows/docs-validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - ".forgeguard/docs.yml"
+      - "docs/site/**"
+      - "docs/maintainers/**"
+      - "scripts/docs/**"
+      - ".github/workflows/docs-validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Validate documentation
+        run: python scripts/docs/validate_docs.py
+
+      # Best-effort external-link check. Non-blocking (only warns) and allowed to
+      # fail so a flaky network never blocks a documentation change.
+      - name: Check external links (non-blocking)
+        continue-on-error: true
+        run: python scripts/docs/validate_docs.py --check-external
