@@ -5,9 +5,9 @@ type: application
 version: 1.1.0
 appVersion: "1.1.0"
 
-home: https://github.com/ForgeGuard/faster-whisper-server
+home: https://github.com/forgeguard-ai/faster-whisper-server
 sources:
-  - https://github.com/ForgeGuard/faster-whisper-server
+  - https://github.com/forgeguard-ai/faster-whisper-server
 
 keywords:
   - stt

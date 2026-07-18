@@ -4,7 +4,7 @@
 fasterWhisper:
   replicaCount: 1
   # The name of the deployment repository (unsuffixed alias; the amd64 image).
-  repository: "ghcr.io/forgeguard/faster-whisper-server"
+  repository: "ghcr.io/forgeguard-ai/faster-whisper-server"
   imagePullSecrets: [] # Set if using a private image or getting rate limited
   # Defaults to the chart appVersion (a pinned release) when empty.
   tag: ""

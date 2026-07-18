@@ -7,7 +7,8 @@
 **ForgeGuard Faster Whisper Server** is a container-native, OpenAI-compatible
 speech-to-text server built on
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and
-[CTranslate2](https://github.com/OpenNMT/CTranslate2). Forked from
+[CTranslate2](https://github.com/OpenNMT/CTranslate2). An independent
+ForgeGuard AI server originally derived from
 [SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 (see [Attribution](#license--attribution)).
 
@@ -27,8 +28,8 @@ bare-metal install path.
 
 | Hardware | Image |
 |---|---|
-| NVIDIA RTX 3000 → 5000 series (x86_64, CUDA cu128) | `ghcr.io/forgeguard/faster-whisper-server:latest` (alias: `faster-whisper-server-cu128`, bakes `large-v3`) |
-| NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard/faster-whisper-server-jetson:latest` (bakes `small`) |
+| NVIDIA RTX 3000 → 5000 series (x86_64, CUDA cu128) | `ghcr.io/forgeguard-ai/faster-whisper-server:latest` (alias: `faster-whisper-server-cu128`, bakes `large-v3`) |
+| NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard-ai/faster-whisper-server-jetson:latest` (bakes `small`) |
 | AMD (ROCm), Intel | planned — see [Roadmap](#roadmap) |
 
 `:latest` works, but pin a release tag (e.g. `:1.1.0`) for stable deployments.
@@ -42,11 +43,11 @@ bare-metal install path.
 ```bash
 # NVIDIA amd64 (RTX 3000 through RTX 5000)
 docker run -d --name whisper --gpus all -p 8000:8000 \
-  ghcr.io/forgeguard/faster-whisper-server:latest
+  ghcr.io/forgeguard-ai/faster-whisper-server:latest
 
 # NVIDIA Jetson (arm64, Orin)
 docker run -d --name whisper --runtime nvidia -p 8000:8000 \
-  ghcr.io/forgeguard/faster-whisper-server-jetson:latest
+  ghcr.io/forgeguard-ai/faster-whisper-server-jetson:latest
 ```
 
 Then:
@@ -82,7 +83,7 @@ requires `Authorization: Bearer <key>`:
 
 ```bash
 docker run -d --gpus all -p 8000:8000 -e API_KEY=change-me \
-  ghcr.io/forgeguard/faster-whisper-server:latest
+  ghcr.io/forgeguard-ai/faster-whisper-server:latest
 
 curl -H 'Authorization: Bearer change-me' http://localhost:8000/v1/models
 ```
@@ -237,7 +238,7 @@ response-format selection, a model-warming banner, transcript copy and download
 ## Kubernetes (Helm)
 
 ```bash
-helm install whisper oci://ghcr.io/forgeguard/charts/faster-whisper-server --version 1.1.0
+helm install whisper oci://ghcr.io/forgeguard-ai/charts/faster-whisper-server --version 1.1.0
 ```
 
 The chart (also in [`charts/faster-whisper-server`](charts/faster-whisper-server))
@@ -317,7 +318,7 @@ volume over `/app/models` — that would shadow the baked weights.
 This repository is licensed under the [MIT License](LICENSE); see
 [NOTICE](NOTICE) for required attributions.
 
-- Forked from [SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- Originally derived from [SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper)
   (MIT) — the inference library this server builds on.
 - [OpenAI Whisper](https://github.com/openai/whisper) model weights (MIT), as
   converted to CTranslate2 format by [Systran](https://huggingface.co/Systran).

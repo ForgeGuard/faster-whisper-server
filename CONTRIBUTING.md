@@ -26,7 +26,7 @@ onnxruntime/ctranslate2 wheels are self-contained. The suite downloads the
 ~75 MB `tiny` model on first run.
 
 ```bash
-git clone https://github.com/ForgeGuard/faster-whisper-server.git
+git clone https://github.com/forgeguard-ai/faster-whisper-server.git
 cd faster-whisper-server
 ```
 

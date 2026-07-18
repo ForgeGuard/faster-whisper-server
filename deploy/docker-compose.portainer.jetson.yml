@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   faster-whisper-api:
-    image: ghcr.io/forgeguard/faster-whisper-server-jetson:latest
+    image: ghcr.io/forgeguard-ai/faster-whisper-server-jetson:latest
     container_name: faster-whisper-api
     restart: unless-stopped
     runtime: nvidia

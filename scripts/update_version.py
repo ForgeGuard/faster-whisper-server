@@ -126,10 +126,10 @@ def update_readme(version: str):
     try:
         content = README_FILE.read_text()
         original_content = content
-        # Pinned ghcr.io/forgeguard/faster-whisper-server[-variant]:X.Y.Z tags —
+        # Pinned ghcr.io/forgeguard-ai/faster-whisper-server[-variant]:X.Y.Z tags —
         # release tags are plain X.Y.Z (no leading v); ':latest' is left alone.
         pattern = (
-            r"(ghcr\.io/forgeguard/faster-whisper-server[\w-]*):(v?\d+\.\d+\.\d+)"
+            r"(ghcr\.io/forgeguard-ai/faster-whisper-server[\w-]*):(v?\d+\.\d+\.\d+)"
         )
         matches = list(re.finditer(pattern, content))
 

@@ -96,6 +96,8 @@ jobs:
             org.opencontainers.image.title=ForgeGuard Faster Whisper Server (CUDA cu128)
             org.opencontainers.image.description=OpenAI-compatible Whisper STT served via FastAPI. amd64 CUDA build (cu128) for NVIDIA RTX 3000 through RTX 5000.
             org.opencontainers.image.version=${{ needs.setup.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -133,6 +135,8 @@ jobs:
           labels: |
             org.opencontainers.image.title=ForgeGuard Faster Whisper Server (Jetson)
             org.opencontainers.image.version=${{ needs.setup.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
   smoke-amd64:
     # Boots the freshly published amd64 image on the CPU runner and asserts the
@@ -218,7 +222,7 @@ jobs:
           VERSION: ${{ needs.setup.outputs.version }}
         run: |
           helm package charts/faster-whisper-server --version "$VERSION" --app-version "$VERSION"
-          helm push "faster-whisper-server-${VERSION}.tgz" oci://ghcr.io/forgeguard/charts
+          helm push "faster-whisper-server-${VERSION}.tgz" oci://ghcr.io/forgeguard-ai/charts
 
   create-release:
     needs: [setup, build-amd64, smoke-amd64]
@@ -251,7 +255,7 @@ jobs:
             echo ""
             echo "## Helm chart"
             echo '```'
-            echo "helm install whisper oci://ghcr.io/forgeguard/charts/faster-whisper-server --version ${VERSION}"
+            echo "helm install whisper oci://ghcr.io/forgeguard-ai/charts/faster-whisper-server --version ${VERSION}"
             echo '```'
             echo ""
             echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/v${VERSION}/CHANGELOG.md) for the curated summary."
